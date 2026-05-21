@@ -294,8 +294,32 @@ app.post('/webhook', express.json(), async (req, res) => {
     // 1. 偵測「今天是第X天」
     const startDay = parseStartDay(text);
     if (startDay !== null && startDay >= 1 && startDay <= 10) {
+      const schedules = await getSchedules();
+      const existing = schedules[groupId];
+
+      if (existing) {
+        const existTimeStr = String(existing.sendHour).padStart(2, '0') + ':' + String(existing.sendMinute).padStart(2, '0');
+        pendingTime[groupId] = { startDay, awaitingConfirm: true };
+        await client.replyMessage({
+          replyToken,
+          messages: [{
+            type: 'text',
+            text: '⚠️ 此群組已有進行中的健康計劃！\n\n📅 目前從第 ' + existing.startDay + ' 天開始\n⏰ 每天 ' + existTimeStr + ' 發送\n✅ 已發送到第 ' + existing.lastSentDay + ' 天\n\n確定要重新設定嗎？\n請輸入「確認重設」繼續，或忽略此訊息取消。',
+          }],
+        });
+        continue;
+      }
+
       pendingTime[groupId] = { startDay };
       await askForTime(replyToken, startDay);
+      continue;
+    }
+
+    // 1.5 確認重設
+    if (text === '確認重設' && pendingTime[groupId] && pendingTime[groupId].awaitingConfirm) {
+      const { startDay: newDay } = pendingTime[groupId];
+      pendingTime[groupId] = { startDay: newDay };
+      await askForTime(replyToken, newDay);
       continue;
     }
 
