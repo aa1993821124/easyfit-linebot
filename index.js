@@ -23,17 +23,7 @@ const client = new line.messagingApi.MessagingApiClient({
 
 const app = express();
 
-// ─── 儲存格式 ───────────────────────────────────────────────────────
-// schedules[groupId] = {
-//   startDay: 1,          // 從第幾天開始（你說的「今天是第X天」）
-//   sendHour: 9,          // 發送小時
-//   sendMinute: 0,        // 發送分鐘
-//   startDate: '2024-01-01', // 開始日期 (YYYY-MM-DD，台灣時間)
-//   lastSentDay: 0,       // 上次已發送到第幾天
-// }
-
 // 暫存：等待使用者輸入時間的群組
-// pendingTime[groupId] = { startDay: X }
 const pendingTime = {};
 
 // ─── 初始化 storage ──────────────────────────────────────────────────
@@ -54,13 +44,12 @@ async function sendDayContent(groupId, dayNum) {
   const tip = tips[dayNum];
   if (!tip) return;
 
-  // LINE 單次 push 最多 5 則訊息，分批發送
   const allMessages = [];
 
   // 文字訊息
   allMessages.push({
     type: 'text',
-    text: `📅 第 ${dayNum} 天健康小常識\n\n${tip.text}`,
+    text: '📅 第 ' + dayNum + ' 天健康小常識\n\n' + tip.text,
   });
 
   // 多張圖片
@@ -84,35 +73,27 @@ async function sendDayContent(groupId, dayNum) {
     for (const batch of batches) {
       await client.pushMessage({ to: groupId, messages: batch });
     }
-    console.log(`✅ 已發送第 ${dayNum} 天內容（${allMessages.length} 則）到群組 ${groupId}`);
+    console.log('已發送第 ' + dayNum + ' 天內容（' + allMessages.length + ' 則）到群組 ' + groupId);
   } catch (err) {
-    console.error(`❌ 發送失敗 群組 ${groupId} 第 ${dayNum} 天:`, err.message);
+    console.error('發送失敗 群組 ' + groupId + ' 第 ' + dayNum + ' 天:', err.message);
   }
 }
 
-// ─── 每分鐘檢查是否有排程需要發送 ──────────────────────────────────
+// ─── 每分鐘檢查排程 ──────────────────────────────────────────────────
 cron.schedule('* * * * *', async () => {
   const now = dayjs().tz(TZ);
   const schedules = await getSchedules();
   let changed = false;
 
   for (const [groupId, s] of Object.entries(schedules)) {
-    const currentHour = now.hour();
-    const currentMinute = now.minute();
+    if (now.hour() !== s.sendHour || now.minute() !== s.sendMinute) continue;
 
-    // 時間是否符合
-    if (currentHour !== s.sendHour || currentMinute !== s.sendMinute) continue;
-
-    // 計算今天是第幾天
     const startDate = dayjs.tz(s.startDate, TZ).startOf('day');
     const today = now.startOf('day');
     const diffDays = today.diff(startDate, 'day');
     const todayDayNum = s.startDay + diffDays;
 
-    // 超過第 10 天就不發了
     if (todayDayNum > 10) continue;
-
-    // 今天已發過了就跳過
     if (s.lastSentDay >= todayDayNum) continue;
 
     await sendDayContent(groupId, todayDayNum);
@@ -130,7 +111,7 @@ function parseStartDay(text) {
   return null;
 }
 
-// ─── 解析時間輸入 HH:MM ──────────────────────────────────────────────
+// ─── 解析時間 HH:MM ──────────────────────────────────────────────────
 function parseTime(text) {
   const match = text.trim().match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return null;
@@ -140,14 +121,14 @@ function parseTime(text) {
   return { hour, minute };
 }
 
-// ─── 發送 Flex：請輸入時間 ────────────────────────────────────────────
+// ─── Flex：問時間 ─────────────────────────────────────────────────────
 async function askForTime(replyToken, startDay) {
   await client.replyMessage({
     replyToken,
     messages: [
       {
         type: 'flex',
-        altText: `請輸入每天發送健康小常識的時間`,
+        altText: '請輸入每天發送健康小常識的時間',
         contents: {
           type: 'bubble',
           size: 'kilo',
@@ -173,7 +154,7 @@ async function askForTime(replyToken, startDay) {
             contents: [
               {
                 type: 'text',
-                text: `✅ 已收到！從第 ${startDay} 天開始`,
+                text: '已收到！從第 ' + startDay + ' 天開始 ✅',
                 weight: 'bold',
                 size: 'md',
                 color: '#27AE60',
@@ -213,17 +194,17 @@ async function askForTime(replyToken, startDay) {
   });
 }
 
-// ─── 發送確認訊息 ─────────────────────────────────────────────────────
-async function sendConfirmation(replyToken, startDay, hour, minute, endDay) {
-  const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-  const remainDays = endDay - startDay + 1;
+// ─── Flex：確認設定 ───────────────────────────────────────────────────
+async function sendConfirmation(replyToken, startDay, hour, minute) {
+  const timeStr = String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0');
+  const remainDays = 10 - startDay + 1;
 
   await client.replyMessage({
     replyToken,
     messages: [
       {
         type: 'flex',
-        altText: `已設定！每天 ${timeStr} 發送健康小常識`,
+        altText: '已設定！每天 ' + timeStr + ' 發送健康小常識',
         contents: {
           type: 'bubble',
           size: 'kilo',
@@ -252,7 +233,7 @@ async function sendConfirmation(replyToken, startDay, hour, minute, endDay) {
                 layout: 'horizontal',
                 contents: [
                   { type: 'text', text: '⏰ 發送時間', size: 'sm', color: '#555555', flex: 2 },
-                  { type: 'text', text: `每天 ${timeStr}`, size: 'sm', color: '#111111', weight: 'bold', flex: 3 },
+                  { type: 'text', text: '每天 ' + timeStr, size: 'sm', color: '#111111', weight: 'bold', flex: 3 },
                 ],
               },
               {
@@ -260,7 +241,7 @@ async function sendConfirmation(replyToken, startDay, hour, minute, endDay) {
                 layout: 'horizontal',
                 contents: [
                   { type: 'text', text: '📅 從第幾天開始', size: 'sm', color: '#555555', flex: 2 },
-                  { type: 'text', text: `第 ${startDay} 天`, size: 'sm', color: '#111111', weight: 'bold', flex: 3 },
+                  { type: 'text', text: '第 ' + startDay + ' 天', size: 'sm', color: '#111111', weight: 'bold', flex: 3 },
                 ],
               },
               {
@@ -268,15 +249,13 @@ async function sendConfirmation(replyToken, startDay, hour, minute, endDay) {
                 layout: 'horizontal',
                 contents: [
                   { type: 'text', text: '📆 剩餘天數', size: 'sm', color: '#555555', flex: 2 },
-                  { type: 'text', text: `共 ${remainDays} 天`, size: 'sm', color: '#111111', weight: 'bold', flex: 3 },
+                  { type: 'text', text: '共 ' + remainDays + ' 天', size: 'sm', color: '#111111', weight: 'bold', flex: 3 },
                 ],
               },
-              {
-                type: 'separator',
-              },
+              { type: 'separator' },
               {
                 type: 'text',
-                text: `今天開始，每天 ${timeStr} 會自動發送健康小常識到此群組 🌿`,
+                text: '今天開始，每天 ' + timeStr + ' 會自動發送健康小常識到此群組 🌿',
                 size: 'xs',
                 color: '#888888',
                 wrap: true,
@@ -289,16 +268,25 @@ async function sendConfirmation(replyToken, startDay, hour, minute, endDay) {
   });
 }
 
-// ─── Webhook 處理 ─────────────────────────────────────────────────────
-app.post('/webhook', line.middleware(config), async (req, res) => {
+// ─── Webhook ──────────────────────────────────────────────────────────
+app.post('/webhook', express.json(), async (req, res) => {
+  // 立刻回 200，避免 LINE timeout
   res.sendStatus(200);
 
-  const events = req.body.events;
+  // 驗證 LINE signature
+  const signature = req.headers['x-line-signature'];
+  if (!signature || !line.validateSignature(JSON.stringify(req.body), config.channelSecret, signature)) {
+    console.warn('無效的 LINE signature，忽略');
+    return;
+  }
+
+  const events = req.body.events || [];
+
   for (const event of events) {
     if (event.type !== 'message' || event.message.type !== 'text') continue;
 
     const groupId = event.source.groupId || event.source.roomId;
-    if (!groupId) continue; // 只處理群組訊息
+    if (!groupId) continue;
 
     const text = event.message.text.trim();
     const replyToken = event.replyToken;
@@ -311,27 +299,19 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
       continue;
     }
 
-    // 2. 如果這個群組正在等待輸入時間
+    // 2. 等待輸入時間
     if (pendingTime[groupId]) {
       const time = parseTime(text);
       if (!time) {
-        // 格式錯誤，再提示一次
         await client.replyMessage({
           replyToken,
-          messages: [
-            {
-              type: 'text',
-              text: '⚠️ 時間格式不對，請用 HH:MM 格式輸入\n例如：09:00 或 20:30',
-            },
-          ],
+          messages: [{ type: 'text', text: '⚠️ 時間格式不對，請用 HH:MM 格式\n例如：09:00 或 20:30' }],
         });
         continue;
       }
 
-      // 設定排程
       const { startDay } = pendingTime[groupId];
       const todayStr = dayjs().tz(TZ).format('YYYY-MM-DD');
-      const endDay = 10;
 
       const schedules = await getSchedules();
       schedules[groupId] = {
@@ -339,13 +319,12 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
         sendHour: time.hour,
         sendMinute: time.minute,
         startDate: todayStr,
-        lastSentDay: startDay - 1, // 還沒發過，從 startDay 開始
+        lastSentDay: startDay - 1,
       };
       await saveSchedules(schedules);
-
       delete pendingTime[groupId];
 
-      await sendConfirmation(replyToken, startDay, time.hour, time.minute, endDay);
+      await sendConfirmation(replyToken, startDay, time.hour, time.minute);
       continue;
     }
 
@@ -373,12 +352,12 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
           messages: [{ type: 'text', text: '此群組目前沒有進行中的健康計劃。\n輸入「今天是第X天」來開始！' }],
         });
       } else {
-        const timeStr = `${String(s.sendHour).padStart(2, '0')}:${String(s.sendMinute).padStart(2, '0')}`;
+        const timeStr = String(s.sendHour).padStart(2, '0') + ':' + String(s.sendMinute).padStart(2, '0');
         await client.replyMessage({
           replyToken,
           messages: [{
             type: 'text',
-            text: `📊 目前發送狀態\n⏰ 時間：每天 ${timeStr}\n📅 開始天數：第 ${s.startDay} 天\n✅ 已發送到：第 ${s.lastSentDay} 天\n🔜 下一次：第 ${s.lastSentDay + 1} 天`,
+            text: '📊 目前發送狀態\n⏰ 時間：每天 ' + timeStr + '\n📅 開始天數：第 ' + s.startDay + ' 天\n✅ 已發送到：第 ' + s.lastSentDay + ' 天\n🔜 下一次：第 ' + (s.lastSentDay + 1) + ' 天',
           }],
         });
       }
@@ -395,6 +374,6 @@ const PORT = process.env.PORT || 3000;
 
 initStorage().then(() => {
   app.listen(PORT, () => {
-    console.log(`🚀 EasyFit LINE Bot 啟動中，Port: ${PORT}`);
+    console.log('EasyFit LINE Bot 啟動中，Port: ' + PORT);
   });
 });
