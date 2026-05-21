@@ -1,0 +1,19 @@
+{
+  "name": "easyfit-linebot",
+  "version": "1.0.0",
+  "description": "EasyFit LINE OA 健康小常識自動發送機器人",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "@line/bot-sdk": "^9.3.0",
+    "express": "^4.18.2",
+    "node-cron": "^3.0.3",
+    "node-persist": "^3.1.3",
+    "dayjs": "^1.11.10",
+    
+    "dotenv": "^16.3.1"
+  }
+}
